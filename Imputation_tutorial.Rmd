@@ -1,0 +1,186 @@
+---
+title: "Methods for Multiple Imputing Analysis with R"
+output: html_notebook
+---
+```{r}
+library(missForest)
+library(Hmisc)
+library(mice)
+library(VIM)
+library(rms)
+```
+
+Start with iris sample data set
+
+```{r}
+data <- iris
+head(iris)
+```
+Randomly add missing values with the prodNA function from missForest
+
+```{r}
+#Produce NAs in 10% of the data
+iris.mis <- prodNA(iris, noNA=0.1)
+head(iris.mis)
+```
+
+Visualize missing data - create table of missing values with this function from the mice package
+
+```{r}
+md.pattern(iris.mis)
+```
+
+Use sapply to find the number of NAs for each variable. This is kind of like the map function. 
+
+```{r}
+sapply(iris.mis, function(x) sum(is.na(x)))
+```
+
+Use VIM::aggr to visualize missing data. This shows % of data missing for each variable and  some nice plots.
+
+```{r}
+miss_plot <- aggr(iris.mis, col=c('navyblue','yellow'),
+                  numbers=TRUE, sortVars=TRUE,
+                  labels=names(iris.mis), cex.axis=.7,
+                  gap=3, ylab=c("Missing data", "Pattern"))
+```
+
+Use marginplot to visualize missing data for the Sepal.Width and Sepal.Length variables. Blue shows non-missing values. Red shows missing data which is imputed. The boxplots for distribution of data are similar indicating this data is missing at random.
+
+```{r}
+marginplot(iris.mis[c(1,2)])
+```
+
+MICE (Multivariate imputation by chained equations)
+m = # of imputations made per missing observation - 5 is normal  and generates 5 data sets with imputed/original values
+maxit = number of iterations
+method = pmm is probable mean matching, another option is logistic regression imputation
+seed = values to randomly generate from
+
+```{r}
+imputed_data <- mice(iris.mis, m=5, maxit=50, method = 'pmm', seed = 500)
+summary(imputed_data)
+#imputed_data is class = mids (multiply imputed data set)
+```
+Check all 5 sets of imputed values for a given variable
+
+```{r}
+imputed_data$imp$Sepal.Width
+```
+
+Visualize missing & observed data. Plot sepal width against all other categories. Blue is observed and red is imputed. Blue and red should be similar so the imputed values are similar to observed.
+
+```{r}
+#plot sepal.width by sepal.length and petal.width
+#pch specifies point shape 
+#cex specifies the size of point shape symbols
+xyplot(imputed_data, Sepal.Width ~ Sepal.Length + Petal.Width,pch=18, cex=1)
+```
+
+```{r}
+#'*why does red(imputed) have multiple lines while blue(observed) has only one?*
+densityplot(imputed_data)
+```
+
+```{r}
+stripplot(imputed_data, pch =  20,  cex = 1.2)
+```
+
+Add the data back to the original data using one of the iterations. Here use the third iteration.
+
+```{r}
+completeData <- complete(imputed_data, 3)
+```
+
+Build a predictive model
+Use all five imputed data sets to build a predictive model. With imputed_data, fit a linear model. The syntax is response ~ terms. So here we are predicting Sepal.Width using Sepal.Length and Petal.Width.
+
+```{r}
+fit <- with(data = imputed_data, exp = lm(Sepal.Width ~ Sepal.Length + Petal.Width))
+```
+
+Pool the results of the predictive model to see how good the imputed data sets are
+
+```{r}
+combine <- pool(fit)
+summary(combine)
+```
+
+missForest- impute missing values using all parameters as default values. Generates a new object of class missForest that is a list of two with names ximp and OOBerror. Ximp is the imputed data matrix and same class as original data. Out-of-bag (OOB) is the imputation error estimate.
+```{r}
+iris.imp <- missForest(iris.mis)
+```
+
+Check imputed values by data set
+
+```{r}
+iris.imp$ximp
+```
+
+Check for imputation error. NRMSE is normalized mean squared error - represents error derived from imputing continuous values. PFC is profortional of falsely classified - error from imputing categorical values
+```{r}
+iris.imp$OOBerror
+```
+
+Compare actual data with imputed data to see error. mixError usage is mixError(ximp, xmis, xtrue)
+```{r}
+iris.err <- mixError(iris.imp$ximp, iris.mis, iris)
+iris.err
+```
+
+Hmisc
+
+Impute values based on the mean of observations. Create a new variable called imputed_age. This will impute missing values for Sepal.Length based on the mean of observations, i.e. the mean of Sepal.Length is 5.87, so it will use this value for all NAs under Sepal.Length.
+
+```{r}
+iris.mis$imputed_age <-  with(iris.mis, impute(Sepal.Length, mean))
+```
+
+Impute values using randomly generated numbers. Can also use min, max, median to impute missing values.
+
+```{r}
+iris.mis$imputed_age2 <- with(iris.mis, impute(Sepal.Length, 'random'))
+```
+
+argImpute
+the argImpute function in Hmisc performs multiple imputation using bootstrapping and predictive mean matching. 
+-Bootstrapping uses random sampling with replacement
+-Different bootstrap resamples are used for each of the multiple imputations
+-Flexible additive model is used to predict missing values from nonmissing values
+-Checks the fit of bootstrapped samples based on a predictive model based on the original data
+
+Predictive mean matching works well for continuous and categorical (binary & multi-level) without the need for computing residuals and maxmimum likelihood fit.
+-Assumes linear relationship for variables being predicted
+
+first argument is formula - add all variables after ~ because you want to impute all of them
+data is the data frame with the missing data
+n.impute is the number of imputations, 5 is common
+
+```{r}
+impute_arg <- aregImpute(~ Sepal.Length + Sepal.Width + Petal.Length + Petal.Width + Species, 
+                         data = iris.mis, n.impute = 5)
+```
+
+see a summary of imputed values. The r^2 describes the likelihood that predicted missing values in the 'irt' (item response theory) data set match what we would have actually observed. Higher values are better.
+
+```{r}
+impute_arg
+```
+
+Check imputed values for the variable Sepal.Length
+
+```{r}
+impute_arg$imputed$Sepal.Length
+```
+
+Use the transcend function to use one of the iterations in our original data set. Calling head(completeData2) will put * next to each imputed value.
+
+```{r}
+completeData2 <- impute.transcan(impute_arg, imputation=1, data=iris.mis, list.out=TRUE, pr=FALSE, check=FALSE)
+```
+
+Now create a fit model using ols (linear model) from the rms package (regression modeling strategies)
+```{r}
+fmi <- fit.mult.impute(Sepal.Length ~ Sepal.Width + Petal.Length + Petal.Width + Species, ols,  impute_arg, data = iris.mis)
+```
+
