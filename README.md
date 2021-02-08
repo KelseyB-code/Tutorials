@@ -9,3 +9,5 @@ Links to the original tutorials can be found below:
 
 [Interpretation of the AUC](https://datascienceplus.com/interpretation-of-the-auc/)
 
+[Another glm tutorial](https://www.machinelearningplus.com/machine-learning/logistic-regression-tutorial-examples-r/)
+
