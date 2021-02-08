@@ -1,0 +1,195 @@
+---
+title: "Interpretation of the AUC"
+output: html_notebook
+---
+
+Notes and code from https://datascienceplus.com/interpretation-of-the-auc/ 
+
+### Intro
+Area under the curve (AUC) of the receiver operating characteristic (ROC)
+AUC = concordance statistic c 
+
+AUC = 0.5 = equal to randomly guessing
+AUC = 1.0 = perfect predictor 
+
+AUC is equivalent to the Mann-Whitney U test statistic
+
+The AUC is "the probability that a randomly selected case will have a higher test result than a randomly selected control."
+
+```{r}
+rm(list = ls())
+df <- data.frame("HCC" = c(0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0), "Biomarker_value" = c(1.063, 1.132, 1.122, 1.058, 0.988, 1.182, 1.037, 1.052, 0.925, 1.232, 0.911, 0.967))
+```
+
+
+### The ROC curve
+
+ROC curve plots the false positive rate (FPR) on the X-axis and true positive rate (TPR) on the y-axis.
+TPR or sensitivity: proportion of actual positives that are correctly identified
+True negative rate (TNR) or specificity: proportion of actual negatives that are correctly identified
+FPR or 1-specificity: proportion of actual negatives that are wrongly identified as positives 
+
+Plot the ROC curve and calculate the estimated AUC using the ROCR package
+
+```{r}
+library(ROCR)
+pred <- prediction(df$Biomarker_value, df$HCC) #prediction(predictions, labels)
+perf <- performance(pred, "tpr", "fpr") #performance(prediction.obj, measure, x.measure="cutoff", ...)
+plot(perf, col="black")
+abline(a=0,  b=1, col="#8AB63F") #adds straight line to graph
+```
+
+Calculate the estimated AUC with the ROCR package
+
+```{r}
+auc <- performance(pred, c("auc"))
+unlist(slot(auc, "y.values"))
+```
+
+### Relation to cutoff points of the biomarker
+
+Visualize the sensitivity and specificity as a function of biomarker cutoff points (alpha.values)
+
+```{r}
+testy <- performance(pred, "tpr", "fpr")
+str(testy)
+```
+
+```{r}
+plot(testy@alpha.values[[1]], testy@x.values[[1]],  type='n',
+     xlab='Cutoff points of the biomarker',
+     ylab='sensitivity or specificity')
+lines(testy@alpha.values[[1]], testy@y.values[[1]],
+      type='s', col="blue", lwd=2)
+lines(testy@alpha.values[[1]], 1-testy@x.values[[1]],
+      type='s', col="green",  lwd=2)
+legend(1.11, .85, c("sensitivity", "specificity"),
+       lty=c(1,1), col=c("blue", "green"), cex=0.9,  bty='n')
+```
+
+Notice that sensitivity increases as specificity decreases
+
+### Mann-Whitney U test statistic
+This is equivalent to the AUC. Use the wilcox.test() function to calculate it
+
+```{r}
+wt <- wilcox.test(data=df, df$Biomarker_value ~ df$HCC)
+1 - wt$statistic/(sum(df$HCC==1)*sum(df$HCC==0))
+```
+ Use the p-value of the Mann-Whitney U test to determine if the AUC differs significantly from 0.5
+ 
+```{r}
+wt <- wilcox.test(data=df, df$Biomarker_value ~ df$HCC)
+wt$p.value
+```
+ 
+### Simulation: the completely uninformative test
+
+```{r}
+set.seed(12345)
+HCC <- rbinom (n=12, size=1, prob=0.27) #generate set of 12 1s and 0s, p(1) = 0.27
+Biomarker_value <- rnorm (12, mean=1, sd=0.1) + HCC*0  #generate 12 normally dist. #s
+
+df <- data.frame (HCC, Biomarker_value)
+library(knitr)
+kable(head(df)) #kable generates a simple table...not sure why this is helpful here
+```
+
+Use expand.grid() to create all possible combos of one case and one control. Then compare the biomarker values between each case and control.
+
+```{r}
+newdf <- expand.grid(Biomarker_value [df$HCC==0], Biomarker_value [df$HCC==1])
+colnames(newdf) <- c("NoHCC", "HCC")
+newdf$Pair <- seq(1,dim(newdf)[1])
+
+newdf$Comparison <- 1*(newdf$HCC>newdf$NoHCC)
+mean(newdf$Comparison)
+```
+
+```{r}
+newdf$Comparison <- factor(newdf$Comparison, labels=c("HCC>NoHCC", "HCC<NoHCC"))
+head(newdf,4)
+```
+
+Create the graph from the beginning of the tutorial.The AUC is the proportion of green lines to blue.
+
+```{r}
+library(data.table)
+longdf = melt(newdf, id.vars = c("Pair", "Comparison"),
+              variable.name = "Group",
+                measure.vars = c("HCC", "NoHCC"))
+
+lab<-paste("AUC = Proportion \n of green lines \nAUC=", round(table(newdf$Comparison)[2]/sum(table(newdf$Comparison)),3))
+library(ggplot2)
+fav.col=c("#1A425C", "#8AB63F")
+ggplot(longdf, aes(x=Group, y=value))+geom_line(aes(group=Pair, col=Comparison)) + 
+        scale_color_manual(values=fav.col)+theme_bw() + 
+        ylab("Biomarker value") + geom_text(x=0.75,y=0.95,label=lab) + 
+        geom_point(shape=21, size=2) + 
+        theme(legend.title=element_blank(), legend.position="bottom")
+```
+
+Make another ROC curve
+
+```{r}
+pred <- prediction(df$Biomarker_value, df$HCC )
+perf <- performance(pred,"tpr","fpr")
+plot(perf,col="black")
+abline(a=0, b=1, col="blue")
+```
+
+
+Calculate the AUC for the new data
+```{r}
+auc <- performance(pred, c("auc"))
+unlist(slot(auc, "y.values"))
+```
+
+```{r}
+testy <- performance(pred,"tpr","fpr")
+plot(testy@alpha.values[[1]], testy@x.values[[1]], type='n', xlab='Cutoff points of the biomarker', ylab='sensitivity or specificity')
+lines(testy@alpha.values[[1]], testy@y.values[[1]], type='s', col="#1A425C")
+lines(testy@alpha.values[[1]], 1-testy@x.values[[1]], type='s', col="#8AB63F")
+legend(1.07,.85, c('sensitivity', 'specificity'), lty=c(1,1), col=c("#1A425C", "#8AB63F"), cex=.9, bty='n')
+```
+
+Examine equivalence with the Mann-Whitney test
+
+```{r}
+wt <-wilcox.test(data=df, df$Biomarker_value ~ df$HCC)
+1 - wt$statistic/(sum(df$HCC==1)*sum(df$HCC==0))
+```
+
+```{r}
+wt$p.value
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
