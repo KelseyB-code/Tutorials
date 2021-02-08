@@ -1,0 +1,105 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Tutorial url: https://www.machinelearningplus.com/machine-learning/logistic-regression-tutorial-examples-r/
+```{r}
+rm(list=ls())
+library(mlbench)
+data("BreastCancer", package="mlbench")
+bc <- BreastCancer[complete.cases(BreastCancer), ]
+```
+
+The Class column is the dependent variable. Start by looking at the class of all the variables.
+
+```{r}
+str(bc)
+```
+
+Consider what happens if you try to build a model predicting Class by Cell.shape, which is a factor with 10 levels. The variable will be split into 9 different binary categorical variables (converts each level in the factor to a dummy binary variable of 1s and 0s)
+
+```{r}
+glm(Class ~ Cell.shape, family="binomial", data = bc)
+```
+
+Need to convert numeric variables 
+
+```{r}
+bc <- bc[,-1] # remove id column
+
+#convert factors to numeric
+for(i in 1:9) {
+ bc[, i] <- as.numeric(as.character(bc[, i])) #remember to convert factors to character first, then numeric
+}
+
+head(bc)
+```
+
+Next convert the outcome variable into a binary factor variable
+
+```{r}
+bc$Class <- ifelse(bc$Class == "malignant", 1, 0) #o=benign, 1=malignant 
+bc$Class <- factor(bc$Class, levels = c(0, 1))
+summary(bc$Class)
+```
+
+The classes are split in ~1:2 ratio - we need to deal with this class imbalance before building the logit model.
+
+###Using upsampling and downsampling to deal with class imbalance
+Downsampling - the majority class is randomly down sampled to be the same size as the smaller class. When you create the training set, the benign class will be picked fewer times with random sampling
+
+Upsampling is the opposite where the minority class is repeatedly sampled until it reaches the same size as the majority
+
+Use caret to create training and test data. The createDataPartition function generates row numbers for the training data set. Set p=0.7 means 70% of data goes to trainData and 30% goes to testData.
+
+```{r}
+library(caret)
+'%ni%' <- Negate('%in%') #define a new function that means not in
+options(scipen=999)
+
+set.seed(100)
+trainDataIndex <- createDataPartition(bc$Class, p=0.7, list = F)  
+trainData <- bc[trainDataIndex, ]
+testData <- bc[-trainDataIndex, ]
+
+table(trainData$Class)
+```
+
+There are about 2x as many samples for benign/0 than malignant. Use downSample function to fix this
+
+```{r}
+set.seed(100)
+down_train <- downSample(x = trainData[, colnames(trainData) %ni% "Class"], #select all columns except class column
+                         y = trainData$Class)
+table(down_train$Class)
+```
+
+Now use upSample function
+```{r}
+set.seed(100)
+up_train <- upSample(x = trainData[, colnames(trainData) %ni% "Class"],
+                     y = trainData$Class)
+
+table(up_train$Class)
+```
+
+###Build the logistic regression model
+
+```{r}
+logitmod <- glm(Class ~ Cl.thickness + Cell.size + Cell.shape, family = "binomial", data=down_train)
+
+summary(logitmod)
+```
+
+###Predict on test data set
+Make a variable pred that contains the probability that the observation is malignant for each observation. Use probability cutoff as 0.5.
+```{r}
+pred <- predict(logitmod, newdata = testData, type = "response")
+y_pred_num <- ifelse(pred > 0.5, 1, 0)
+y_pred <- factor(y_pred_num, levels = c(0,1))
+y_act <- testData$Class
+
+mean(y_pred == y_act)
+```
+
